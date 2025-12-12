@@ -6,7 +6,7 @@
 ![Vue.js](https://img.shields.io/badge/Frontend-Vue3%20%2B%20ElementPlus-42b883?logo=vue.js)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-**RenewHelper - 时序·守望** 是一款基于 **Cloudflare Workers** 的全栈服务生命周期提醒、管理工具。它专为管理周期性订阅、域名续费、服务器到期等场景设计。无需服务器，零成本托管，提供精美的机甲风（Mecha-style）UI 界面、强大的农历/公历计算核心、多渠道通知推送能力以及 iCal 日程同步。
+**RenewHelper - 时序·守望** 是一款基于 **Cloudflare Workers** 的全栈服务生命周期提醒、管理工具。它专为管理周期性订阅、域名续费、服务器到期等场景设计。无需服务器，零成本托管，提供精美的机甲风（Mecha-style）UI 界面、强大的农历/公历计算核心、多渠道通知推送能力以及 iCal 日程同步。**v1.3.5+ 已同时支持Worker方式和Docker方式部署。**
 
 <div align="center">
   <img src="./assets/mainUI_lightCN_shot.png" alt="RenewHelper 界面预览" width="800">
@@ -15,7 +15,7 @@
 
 ## ✨ 核心特性
 
-- **⚡️ Serverless 架构**：完全运行在 Cloudflare Workers 上，利用 KV 存储数据，无需购买 VPS，免费额度通常足够个人使用。
+- **⚡️ Serverless 架构**：完全运行在 Cloudflare Workers 上，利用 KV 存储数据，无需购买 VPS，免费额度通常足够个人使用。v1.3.5+ 已同时支持单机Docker方式部署。
 - **📅 智能周期管理**：
   - 支持**公历**与**农历**（Lunar）周期计算。内置高精度农历算法（1900-2100），支持公历循环（如月付/年付）和农历循环（如生日、传统节日）。
   - 支持按天、月、年为周期的自动推算。
@@ -108,6 +108,146 @@
 4.  **Cron schedule**: 准确输入 `0/30 * * * *` (代表 UTC 时间每天每个半点检查一次，不能改！！！)。
 5.  点击 **Add Trigger**。
 
+### 方式三：Docker部署
+
+RenewHelper 支持通过 Docker 进行一键私有化部署。该方案利用 Miniflare 在本地模拟 Cloudflare Workers 环境，配合 Node-cron 实现稳定的定时任务，确保数据完全掌握在您自己手中。
+
+#### 准备工作
+
+  * 服务器需安装 Docker 和 Docker Compose。
+
+#### 快速开始
+
+1.  VPS新建一个文件夹（例如 `renewhelper`）。
+2.  在文件夹中创建一个名为 `docker-compose.yml` 的文件，填入以下内容：
+
+```yaml
+services:
+  renew-helper:
+    # 官方镜像地址
+    image: ieax/renewhelper:latest
+    container_name: renew-helper
+    restart: unless-stopped
+    ports:
+      - "9787:9787" # 将容器内部的 9787 端口映射到宿主机的 9787
+    volumes:
+      # 数据持久化：将宿主机的 ./data 目录挂载进去，防止重启丢失数据
+      - ./data:/data
+    environment:
+      # --- 核心配置 ---
+      
+      # 1. 登录密码 (必填)
+      - AUTH_PASSWORD=你的访问密码
+      
+      # 2. 定时任务频率 (关键配置)
+      # 建议：设置为每30分钟运行一次，不要修改！！！
+      # 语法："0,30 * * * *" 表示在每小时的第0分和第30分各触发一次。
+      - CRON_SCHEDULE=0,30 * * * *
+      
+      # 3. 容器时区
+      # 决定了 Cron 什么时候"醒来"，建议设置为你所在的地区
+      - TZ=Asia/Shanghai
+```
+
+3.  启动服务：
+
+    ```bash
+    docker compose up -d
+    ```
+
+4.  打开浏览器访问：`http://你的服务器IP:9787`。为了安全地通过互联网访问 RenewHelper（例如 `https://renew.example.com`），建议配置反向代理。
+
+---
+
+<details>
+<summary><strong>🔒 进阶配置: 点击展开 Caddy 反代配置指南</strong></summary>
+
+#### 1\. 修改 `docker-compose.yml`
+
+请参照下方配置修改您的文件，添加 Caddy 服务。
+
+```yaml
+services:
+  renew-helper:
+    image: ieax/renewhelper:latest
+    container_name: renew-helper
+    restart: unless-stopped
+    # 移除 ports 映射，只暴露端口给 Caddy，更安全
+    expose:
+      - "9787"
+    volumes:
+      - ./data:/data
+    environment:
+      - AUTH_PASSWORD=admin
+      - CRON_SCHEDULE=0,30 * * * *
+      - TZ=Asia/Shanghai
+
+  caddy:
+    image: caddy:alpine
+    container_name: caddy-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"   # HTTP
+      - "443:443" # HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - renew-helper
+
+volumes:
+  caddy_data:
+  caddy_config:
+```
+
+#### 2\. 创建 `Caddyfile`
+
+在项目根目录下创建一个名为 `Caddyfile` 的文件（注意没有后缀名）：
+
+```caddy
+# 请将此处替换为您解析好的域名
+your-domain.com {
+    encode gzip
+    # renew-helper 是 docker 服务名，9787 是容器内部端口
+    reverse_proxy renew-helper:9787
+}
+```
+
+#### 3\. 启动服务
+
+```bash
+docker compose up -d
+```
+
+>启动后，Caddy 会自动申请 SSL 证书，您可以通过 `https://您的域名` 安全访问服务。
+</details>
+
+#### ⚠️ 重要提示：时区设置
+
+为了确保通知时间准确，请确保以下两处设置一致：
+
+1.  **Docker 环境变量 (`TZ`)**：决定了 RenewHelper 什么时候**醒来**执行检查。
+2.  **网页端 -\> 系统设置 -\> 偏好时区**：决定了 RenewHelper 醒来后，**认为现在是几点**。
+
+#### 💾 数据备份与迁移
+
+  * **数据位置**：所有数据（订阅列表、系统配置、日志）都保存在 `docker-compose.yml` 同级目录下的 `./data` 文件夹中。
+  * **备份**：直接复制或压缩 `./data` 文件夹即可。
+  * **迁移**：在通过 Docker 部署新实例时，将备份的 `./data` 文件夹放入目录，启动后数据会自动恢复。
+
+#### 🔄 更新版本
+
+当项目发布新版本时，执行以下命令即可更新：
+
+```bash
+# 1. 拉取最新镜像
+docker compose pull
+
+# 2. 重建并重启容器
+docker compose up -d
+```
+
 ### 🎉 部署完成！
 
 ---
@@ -178,7 +318,7 @@
 ## ⚠️ 注意事项
 
 1.  **数据安全**：所有数据存储在您的 Cloudflare KV 中, 建议定期手动导出 JSON 备份。
-2.  **免费版限制**：
+2.  **免费版限制**：（Docker方式不受此限制）
     - Cloudflare Workers 免费版每天限制 100,000 次请求。
     - KV 每天写入限制 1,000 次。
 

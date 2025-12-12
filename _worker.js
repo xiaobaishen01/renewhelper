@@ -1,11 +1,12 @@
 /**
- * Cloudflare Worker: RenewHelper (v1.3.3)
+ * Cloudflare Worker: RenewHelper (v1.3.5)
  * Author: LOSTFREE
  * Features: Multi-Channel Notify, Import/Export, Channel Test, Bilingual UI, Precise ICS Alarm
- * added: sort, filter
+ * added: sort, filter v1.3.4
+ * added: dockerfile v1.3.5
  */
 
-const APP_VERSION = "v1.3.3";
+const APP_VERSION = "v1.3.5";
 
 // ==========================================
 // 1. Core Logic (Lunar & Calc)
@@ -388,9 +389,8 @@ const DataStore = {
     await env.RENEW_KV.put(this.KEYS.SETTINGS, JSON.stringify(data, null, 2));
   },
 
-  // 【修复】移除 cacheTtl 参数，修复 400 错误
   async getItemsPackage(env) {
-    // 移除 cacheTtl: 0，默认读取
+
     const raw = await env.RENEW_KV.get(this.KEYS.ITEMS, { type: "text" });
     try {
       if (!raw) return { items: [], version: 0 };
@@ -407,7 +407,6 @@ const DataStore = {
     }
   },
 
-  // 【修复】移除 cacheTtl 参数
   async getItems(env) {
     const pkg = await this.getItemsPackage(env);
     return pkg.items;
@@ -819,7 +818,7 @@ function t(k, l, ...a) {
 }
 
 async function checkAndRenew(env, isSched, lang = "zh") {
-  // 【修改】使用 getItemsPackage 获取带版本的数据
+  // 使用 getItemsPackage 获取带版本的数据
   const [conf, pkg] = await Promise.all([
     DataStore.getSettings(env),
     DataStore.getItemsPackage(env),
@@ -846,20 +845,25 @@ async function checkAndRenew(env, isSched, lang = "zh") {
   // 1. 获取基于偏好时区的“今天”
   const today = Calc.getTzToday(s.timezone);
 
-  // 2. 获取基于偏好时区的“当前时:分”
-  let nowH = 0,
-    nowM = 0;
+  // 2. 获取基于偏好时区的“当前时:分” (修复 Docker 环境兼容性)
+  let nowH = 0, nowM = 0;
   try {
-    const now = new Date();
-    const str = now.toLocaleString("en-US", {
+    const fmt = new Intl.DateTimeFormat("en-US", {
       timeZone: s.timezone || "UTC",
       hour12: false,
       hour: "numeric",
       minute: "numeric",
     });
-    [nowH, nowM] = str.split(":").map(Number);
+    const parts = fmt.formatToParts(new Date());
+    const find = (t) => {
+        const p = parts.find(x => x.type === t);
+        return p ? parseInt(p.value, 10) : 0;
+    };
+    nowH = find("hour");
+    nowM = find("minute");
+
   } catch (e) {
-    /* Fallback */
+    log(`[ERR] Time calc failed: ${e.message}`);
   }
 
   for (let i = 0; i < items.length; i++) {
@@ -1466,7 +1470,7 @@ const HTML = `<!DOCTYPE html>
     <script src="https://unpkg.com/vue@3.5.25/dist/vue.global.prod.js"></script>
     <script src="https://unpkg.com/element-plus@2.11.9/dist/index.full.min.js"></script>
     <script src="https://unpkg.com/@element-plus/icons-vue@2.3.2/dist/index.iife.min.js"></script>
-    <script src="//unpkg.com/element-plus@2.11.9/dist/locale/zh-cn.min.js"></script>
+    <script src="https://unpkg.com/element-plus@2.11.9/dist/locale/zh-cn.min.js"></script>
     <script>
         window.ElementPlusIconsVue = window.ElementPlusIconsVue || window.ElementPlusIcons;
         window.onload = function() {
